@@ -1,25 +1,24 @@
-name: .NET
-
+name: dotnet package
 on:
   push:
-    branches: [ "dev" ]
-  pull_request:
-    branches: [ "dev" ]
+    branches:
+      - feature/mq-test
 
 jobs:
-  build:
-
+  build-node:
+    name: Build-Node
     runs-on: ubuntu-latest
-
+      
     steps:
-    - uses: actions/checkout@v3
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v2
-      with:
-        dotnet-version: 6.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+      - uses: actions/checkout@v2
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '6.0.x'
+      - run: |
+          dotnet --version
+          dotnet publish AElf.sln /p:NoBuild=false --configuration Release -o /build/node
+          docker build -t node -f .github/workflows/Dockerfile .
+          docker tag node ienyan/aelf-node-mq
+          docker login -u ${{ secrets.DOCKER_ENYUAN_USER }} -p ${{ secrets.DOCKER_TEST_ENYUAN_PASSWD }}
+          docker push ienyan/aelf-node-mq
