@@ -33,7 +33,7 @@ internal class CodeCheckProposalService:ICodeCheckProposalService,ITransientDepe
         _codeCheckProposalProvider.AddProposal(proposalId, proposalInputHash, height);
     }
 
-    public async Task<List<CodeCheckProposal>> GetToReleasedProposalListAsync(Address @from, Hash blockHash, long blockHeight)
+    public async Task<List<CodeCheckProposal>> GetToReleasedProposalListAsync(Address from, Hash blockHash, long blockHeight)
     {
         var proposalList = _codeCheckProposalProvider.GetAllProposals();
         var result = await _contractReaderFactory.Create(new ContractReaderContext
@@ -44,8 +44,7 @@ internal class CodeCheckProposalService:ICodeCheckProposalService,ITransientDepe
             {
                 BlockHash = blockHash,
                 BlockHeight = blockHeight
-            }),
-            Sender = from
+            })
         }).GetReleaseThresholdReachedProposals.CallAsync(new ProposalIdList
             { ProposalIds = { proposalList.Select(o => o.ProposalId).ToList() } });
 
@@ -82,7 +81,7 @@ internal class CodeCheckProposalService:ICodeCheckProposalService,ITransientDepe
                 h > blockHeight)
                 continue;
             Logger.LogDebug("Clear code check proposal {proposalId} by LIB hash {blockHash}, height {blockHeight}",
-                proposalId.ToString(), blockHash.ToHex(), blockHeight);
+                proposalId.ToHex(), blockHash.ToHex(), blockHeight);
             _codeCheckProposalProvider.RemoveProposalById(proposalId);
             
             await _codeCheckReleasedProposalIdProvider.RemoveProposalIdAsync(new BlockIndex
