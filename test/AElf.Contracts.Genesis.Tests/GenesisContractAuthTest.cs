@@ -256,7 +256,6 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
             nameof(BasicContractZeroImplContainer.BasicContractZeroImplStub.GetContractInfo), deployAddress));
         contractInfo.Version.ShouldBe(1);
         contractInfo.Author.ShouldBe(BasicContractZeroAddress);
-        contractInfo.IsUserContract.ShouldBeFalse();
         contractInfo.ContractVersion.ShouldBe("1.0.0.0");
 
         {
@@ -349,7 +348,7 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
             var proposingTxResult = await otherTester.ExecuteContractWithMiningAsync(BasicContractZeroAddress,
                 nameof(BasicContractZero.ProposeNewContract), newContractDeploymentInput);
             proposingTxResult.Status.ShouldBe(TransactionResultStatus.Failed);
-            proposingTxResult.Error.ShouldContain("Unauthorized to propose.");
+            proposingTxResult.Error.ShouldContain("contract code has already been deployed before");
         }
     }
 
@@ -435,36 +434,8 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
 
         var proposingTxResult = await Tester.ExecuteContractWithMiningAsync(BasicContractZeroAddress,
             nameof(BasicContractZero.ProposeUpdateContract), contractUpdateInput);
-        proposingTxResult.Status.ShouldBe(TransactionResultStatus.Mined);
-
-        var proposalId = ProposalCreated.Parser
-            .ParseFrom(proposingTxResult.Logs.First(l => l.Name.Contains(nameof(ProposalCreated))).NonIndexed)
-            .ProposalId;
-        proposalId.ShouldNotBeNull();
-        var proposedContractInputHash = ContractProposed.Parser
-            .ParseFrom(proposingTxResult.Logs.First(l => l.Name.Contains(nameof(ContractProposed))).NonIndexed)
-            .ProposedContractInputHash;
-        await ApproveWithMinersAsync(Tester, ParliamentAddress, proposalId);
-
-        var releaseApprovedContractTxResult = await Tester.ExecuteContractWithMiningAsync(BasicContractZeroAddress,
-            nameof(BasicContractZero.ReleaseApprovedContract), new ReleaseContractInput
-            {
-                ProposalId = proposalId,
-                ProposedContractInputHash = proposedContractInputHash
-            });
-        releaseApprovedContractTxResult.Status.ShouldBe(TransactionResultStatus.Mined);
-        var codeCheckProposalId = ProposalCreated.Parser
-            .ParseFrom(releaseApprovedContractTxResult.Logs.First(l => l.Name.Contains(nameof(ProposalCreated)))
-                .NonIndexed).ProposalId;
-        codeCheckProposalId.ShouldNotBeNull();
-
-        await ApproveWithMinersAsync(Tester, ParliamentAddress, codeCheckProposalId);
-        var updateResult = await Tester.ExecuteContractWithMiningAsync(BasicContractZeroAddress,
-            nameof(BasicContractZeroImplContainer.BasicContractZeroImplStub.ReleaseCodeCheckedContract),
-            new ReleaseContractInput
-                { ProposedContractInputHash = proposedContractInputHash, ProposalId = codeCheckProposalId });
-        updateResult.Status.ShouldBe(TransactionResultStatus.Failed);
-        updateResult.Error.ShouldContain("Same code has been deployed before.");
+        proposingTxResult.Status.ShouldBe(TransactionResultStatus.Failed);
+        proposingTxResult.Error.ShouldContain("contract code has already been deployed before");
     }
 
     [Fact]
@@ -549,7 +520,6 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
             nameof(BasicContractZeroImplContainer.BasicContractZeroImplStub.GetContractInfo), newAddress));
         updateContractInfo.Version.ShouldBe(contractInfo.Version + 1);
         updateContractInfo.ContractVersion.ShouldBe("1.2.0.0");
-        updateContractInfo.IsUserContract.ShouldBeFalse();
 
         var codeThird = Codes.Single(kv => kv.Key.Contains("TestContract.BasicSecurity")).Value;
         contractUpdateInput = new ContractUpdateInput
@@ -1069,7 +1039,8 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
             // propose contract code
             var repeatedProposingTxResult = await Tester.ExecuteContractWithMiningAsync(BasicContractZeroAddress,
                 nameof(BasicContractZero.ProposeNewContract), contractDeploymentInput);
-            repeatedProposingTxResult.Status.ShouldBe(TransactionResultStatus.Mined);
+            repeatedProposingTxResult.Status.ShouldBe(TransactionResultStatus.Failed);
+            repeatedProposingTxResult.Error.ShouldContain("contract code has already been deployed before");
         }
     }
 
@@ -1592,7 +1563,6 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
         var deployResult = await SideChainTester.ExecuteContractWithMiningAsync(SideBasicContractZeroAddress,
             nameof(ACS0Container.ACS0Stub.DeployUserSmartContract), contractDeploymentInput);
         deployResult.Status.ShouldBe(TransactionResultStatus.Mined);
-        var codeHash = Hash.Parser.ParseFrom(deployResult.ReturnValue);
 
         var proposalId = ProposalCreated.Parser
             .ParseFrom(deployResult.Logs.First(l => l.Name.Contains(nameof(ProposalCreated))).NonIndexed)
@@ -1659,7 +1629,7 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
         var deployResult = await SideChainTester.ExecuteContractWithMiningAsync(SideBasicContractZeroAddress,
             nameof(ACS0Container.ACS0Stub.DeployUserSmartContract), contractDeploymentInput);
         deployResult.Status.ShouldBe(TransactionResultStatus.Mined);
-        var codeHash = Hash.Parser.ParseFrom(deployResult.ReturnValue);
+        var codeHash = DeployUserSmartContractOutput.Parser.ParseFrom(deployResult.ReturnValue).CodeHash;
         
         var proposalId = ProposalCreated.Parser
             .ParseFrom(deployResult.Logs.First(l => l.Name.Contains(nameof(ProposalCreated))).NonIndexed)
@@ -1707,7 +1677,6 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
         var registration = await SideChainTester.CallContractMethodAsync(SideBasicContractZeroAddress,
             nameof(ACS0Container.ACS0Stub.GetSmartContractRegistrationByCodeHash), codeHash);
         var smartContractRegistration = SmartContractRegistration.Parser.ParseFrom(registration);
-        smartContractRegistration.IsUserContract.ShouldBeTrue();
         smartContractRegistration.IsSystemContract.ShouldBeFalse();
         smartContractRegistration.ContractAddress.ShouldBe(contractDeployed.Address);
         smartContractRegistration.CodeHash.ShouldBe(codeHash);
@@ -1715,7 +1684,6 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
         var info = await SideChainTester.CallContractMethodAsync(SideBasicContractZeroAddress,
             nameof(ACS0Container.ACS0Stub.GetContractInfo), contractDeployed.Address);
         var contractInfo = ContractInfo.Parser.ParseFrom(info);
-        contractInfo.IsUserContract.ShouldBeTrue();
         contractInfo.IsSystemContract.ShouldBeFalse();
         contractInfo.CodeHash.ShouldBe(codeHash);
         contractInfo.Author.ShouldBe(Address.FromPublicKey(CreatorKeyPair.PublicKey));
@@ -1775,14 +1743,12 @@ public class GenesisContractAuthTest : BasicContractZeroTestBase
         info = await SideChainTester.CallContractMethodAsync(SideBasicContractZeroAddress,
             nameof(ACS0Container.ACS0Stub.GetContractInfo), contractDeployed.Address);
         contractInfo = ContractInfo.Parser.ParseFrom(info);
-        contractInfo.IsUserContract.ShouldBeTrue();
         contractInfo.IsSystemContract.ShouldBeFalse();
         contractInfo.Author.ShouldBe(Address.FromPublicKey(CreatorKeyPair.PublicKey));
         
         registration = await SideChainTester.CallContractMethodAsync(SideBasicContractZeroAddress,
             nameof(ACS0Container.ACS0Stub.GetSmartContractRegistrationByCodeHash), contractInfo.CodeHash);
         smartContractRegistration = SmartContractRegistration.Parser.ParseFrom(registration);
-        smartContractRegistration.IsUserContract.ShouldBeTrue();
         smartContractRegistration.IsSystemContract.ShouldBeFalse();
         smartContractRegistration.ContractAddress.ShouldBe(contractDeployed.Address);
         smartContractRegistration.CodeHash.ShouldBe(contractInfo.CodeHash);

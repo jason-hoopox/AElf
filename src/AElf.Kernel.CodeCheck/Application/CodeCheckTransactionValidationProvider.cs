@@ -13,18 +13,16 @@ namespace AElf.Kernel.CodeCheck.Application;
 internal class CodeCheckTransactionValidationProvider : ITransactionValidationProvider
 {
     private readonly ICodeCheckService _codeCheckService;
-    private readonly ICodePatchService _codePatchService;
     private readonly IContractReaderFactory<ACS0Container.ACS0Stub> _contractReaderFactory;
     private readonly ISmartContractAddressService _smartContractAddressService;
 
     public CodeCheckTransactionValidationProvider(
         ICodeCheckService codeCheckService, IContractReaderFactory<ACS0Container.ACS0Stub> contractReaderFactory,
-        ISmartContractAddressService smartContractAddressService, ICodePatchService codePatchService)
+        ISmartContractAddressService smartContractAddressService)
     {
         _codeCheckService = codeCheckService;
         _contractReaderFactory = contractReaderFactory;
         _smartContractAddressService = smartContractAddressService;
-        _codePatchService = codePatchService;
         LocalEventBus = NullLocalEventBus.Instance;
     }
 
@@ -34,17 +32,25 @@ internal class CodeCheckTransactionValidationProvider : ITransactionValidationPr
 
     public async Task<bool> ValidateTransactionAsync(Transaction transaction, IChainContext chainContext)
     {
+        var genesisContractAddress = _smartContractAddressService.GetZeroSmartContractAddress();
+        if (transaction.To != genesisContractAddress)
+        {
+            return true;
+        }
+
         var executionValidationResult = true;
         switch (transaction.MethodName)
         {
+            case nameof(ACS0Container.ACS0Stub.ProposeNewContract):
             case nameof(ACS0Container.ACS0Stub.DeployUserSmartContract):
                 var deployInput = ContractDeploymentInput.Parser.ParseFrom(transaction.Params);
-                executionValidationResult = await CodeCheckWithPatchAsync(deployInput.Code.ToByteArray(),
-                    chainContext.BlockHash, chainContext.BlockHeight, deployInput.Category);
+                executionValidationResult = await _codeCheckService.PerformCodeCheckAsync(
+                    deployInput.Code.ToByteArray(), chainContext.BlockHash, chainContext.BlockHeight,
+                    deployInput.Category, false, IsUserContract(transaction.MethodName));
                 break;
+            case nameof(ACS0Container.ACS0Stub.ProposeUpdateContract):
             case nameof(ACS0Container.ACS0Stub.UpdateUserSmartContract):
                 var updateInput = ContractUpdateInput.Parser.ParseFrom(transaction.Params);
-                var genesisContractAddress = _smartContractAddressService.GetZeroSmartContractAddress();
                 var contractInfo = await _contractReaderFactory.Create(new ContractReaderContext
                 {
                     BlockHash = chainContext.BlockHash,
@@ -58,10 +64,10 @@ internal class CodeCheckTransactionValidationProvider : ITransactionValidationPr
                 }
                 else
                 {
-                    executionValidationResult = await CodeCheckWithPatchAsync(updateInput.Code.ToByteArray(),
-                        chainContext.BlockHash, chainContext.BlockHeight, contractInfo.Category);
+                    executionValidationResult = await _codeCheckService.PerformCodeCheckAsync(
+                        updateInput.Code.ToByteArray(), chainContext.BlockHash, chainContext.BlockHeight,
+                        contractInfo.Category, contractInfo.IsSystemContract, IsUserContract(transaction.MethodName));
                 }
-
                 break;
         }
 
@@ -79,14 +85,9 @@ internal class CodeCheckTransactionValidationProvider : ITransactionValidationPr
         return executionValidationResult;
     }
 
-    private async Task<bool> CodeCheckWithPatchAsync(byte[] code, Hash blockHash, long blockHeight, int category)
+    private bool IsUserContract(string methodName)
     {
-        if (_codePatchService.PerformCodePatch(code, category, false, out var patchedCode))
-        {
-            return await _codeCheckService.PerformCodeCheckAsync(patchedCode, blockHash, blockHeight, category, false,
-                true);
-        }
-
-        return false;
+        return methodName == nameof(ACS0Container.ACS0Stub.DeployUserSmartContract) ||
+               methodName == nameof(ACS0Container.ACS0Stub.UpdateUserSmartContract);
     }
 }
